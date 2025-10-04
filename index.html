@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Absensi Piket Kelas – Xictorious</title>
+  <style>
+    :root{
+      --bg:#0f172a; --card:#111827; --muted:#1f2937; --text:#e5e7eb;
+      --accent:#22c55e; --accent-2:#3b82f6; --warn:#ef4444; --border:#334155;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Ubuntu,Arial,sans-serif;background:linear-gradient(180deg,#0b1228,#0f172a);color:var(--text)}
+    header{position:sticky;top:0;z-index:10;background:rgba(15,23,42,.8);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+    .container{max-width:1100px;margin:0 auto;padding:18px}
+    h1{margin:0 0 6px;font-size:clamp(20px,2.8vw,28px)}
+    .sub{opacity:.85;font-size:14px}
+    .clock{font-variant-numeric:tabular-nums;font-weight:700;letter-spacing:.3px}
+    .grid{display:grid;gap:16px}
+    @media(min-width:900px){.grid{grid-template-columns:1.2fr .8fr}}
+    .card{background:linear-gradient(180deg,#0e162e 0%, #0c1226 100%);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+    select,input,button{background:#0b1226;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:14px}
+    button{cursor:pointer;border-color:#2b354a}
+    button.primary{background:linear-gradient(90deg,var(--accent),#16a34a);border:none;font-weight:700}
+    button.secondary{background:linear-gradient(90deg,var(--accent-2),#2563eb);border:none;font-weight:700}
+    button.warn{background:linear-gradient(90deg,#ef4444,#dc2626);border:none;font-weight:700}
+    .chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+    .chip{display:flex;align-items:center;gap:8px;background:#0b1224;border:1px dashed #2b3752;padding:6px 10px;border-radius:999px}
+    .list{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:12px}
+    .item{background:#0b1226;border:1px solid var(--border);padding:10px;border-radius:10px;display:flex;gap:10px;align-items:center}
+    .item input{width:18px;height:18px}
+    .muted{opacity:.75}
+    table{width:100%;border-collapse:collapse;font-size:14px}
+    th,td{border-bottom:1px solid var(--border);padding:10px;text-align:left}
+    th{position:sticky;top:0;background:#0d142a;z-index:1}
+    .empty{opacity:.7;padding:16px;text-align:center}
+    footer{opacity:.7;text-align:center;padding:28px 12px}
+    .kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;background:#0a1022;border:1px solid #27324a;padding:2px 6px;border-radius:6px;font-size:12px}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container row" style="justify-content:space-between">
+      <div>
+        <h1>Absensi Piket Kelas – Xictorious</h1>
+        <div class="sub">
+          Tandai yang hadir lalu klik <b>Submit Absen</b>. Waktu tersimpan otomatis (Asia/Jakarta).
+          <span class="muted">Data disimpan lokal & juga dikirim ke Google Sheets.</span>
+        </div>
+      </div>
+      <div class="clock" id="clock">--:--:--</div>
+    </div>
+  </header>
+
+  <main class="container grid" id="app">
+    <section class="card">
+      <div class="row">
+        <label for="daySelect">Hari:</label>
+        <select id="daySelect" aria-label="Pilih hari piket"></select>
+        <button class="secondary" id="btnReloadList" title="Muat ulang daftar sesuai hari">Muat Daftar</button>
+      </div>
+
+      <div class="chips" id="legend">
+        <div class="chip"><span class="kbd">Enter</span> / <span class="kbd">Ctrl+S</span> kirim cepat</div>
+        <div class="chip">Total tercentang: <b id="checkedCount">0</b></div>
+      </div>
+
+      <div class="list" id="studentList" aria-live="polite"></div>
+
+      <div class="row" style="margin-top:12px;justify-content:space-between">
+        <div class="muted">Nama mengikuti jadwal piket harian.</div>
+        <div class="row" style="gap:8px">
+          <button class="primary" id="btnSubmit">Submit Absen</button>
+          <button class="warn" id="btnClearDay">Hapus Centang</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 style="margin:0;font-size:18px">Riwayat Absensi (Local)</h2>
+        <div class="row" style="gap:8px">
+          <button id="btnExport" class="secondary">Ekspor CSV</button>
+          <button id="btnClearAll" class="warn">Hapus Semua Data</button>
+        </div>
+      </div>
+      <div style="max-height:380px;overflow:auto;margin-top:10px;border:1px solid var(--border);border-radius:10px">
+        <table id="table">
+          <thead>
+            <tr>
+              <th style="width:120px">Tanggal</th>
+              <th style="width:90px">Jam</th>
+              <th>Hari</th>
+              <th>Nama</th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <tr><td colspan="4" class="empty">Belum ada data.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Dibuat untuk kelas <b>Xictorious</b>. Timezone: Asia/Jakarta.
+  </footer>
+
+  <script>
+    /* ============== CONFIG (sudah diisi dengan data kamu) ============== */
+    const ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbxL0YoGI8tb924E-f-SXlxLnQqINnet_PUiAo1t0CU65vuCzLW2mSsac06oIT1K3-I1/exec';
+    const SECRET_TOKEN = 'RAFIF';
+    const EMAIL_NOTIFY = ''; // opsional: isi email kalau mau dapat notifikasi
+
+    /* ====================== DATA JADWAL ====================== */
+    const schedule = {
+      senin:  ["afriza","altirta","ananda","alfath","faiz","andhika","dani"],
+      selasa: ["icha","cheindy","alviera","fachri","farrel","nanta","galih"],
+      rabu:   ["fadillah","farizahlul","fatmahda","gio s","giovani","jojo","tama"],
+      kamis:  ["jessica","lailidya","naila","azril","rafif","nathan f","raffi"],
+      jumat:  ["natasya","revina","shabrina","viona","rehath","rei nathan","richard","roxy"]
+    };
+    const DAY_LABEL = { senin:'Senin', selasa:'Selasa', rabu:'Rabu', kamis:'Kamis', jumat:"Jum'at" };
+
+    /* ====================== UTIL WAKTU ====================== */
+    const TZ = 'Asia/Jakarta';
+    function nowParts(){
+      const d = new Date();
+      const tanggal = new Intl.DateTimeFormat('id-ID',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
+      const jam = new Intl.DateTimeFormat('id-ID',{timeZone:TZ,hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(d);
+      const [dd,mm,yyyy] = tanggal.split('/');
+      const iso = `${yyyy}-${mm}-${dd}`;
+      return { tanggal, jam, iso, dayKey: dayKeyFromDate(d) };
+    }
+    function dayKeyFromDate(d){
+      const wd = new Intl.DateTimeFormat('id-ID',{timeZone:TZ,weekday:'long'}).format(d).toLowerCase();
+      if (wd.includes('senin')) return 'senin';
+      if (wd.includes('selasa')) return 'selasa';
+      if (wd.includes('rabu')) return 'rabu';
+      if (wd.includes('kamis')) return 'kamis';
+      if (wd.includes('jum')) return 'jumat';
+      return 'senin';
+    }
+
+    /* ================== LOCAL STORAGE (riwayat perangkat) ================== */
+    const LS_KEY = 'piketAbsensi_Xictorious_v1';
+    function loadRecords(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)||'[]'); }catch{ return []; } }
+    function saveRecords(v){ localStorage.setItem(LS_KEY, JSON.stringify(v)); }
+
+    /* ====================== DOM ELEMENTS ====================== */
+    const daySelect = document.getElementById('daySelect');
+    const studentList = document.getElementById('studentList');
+    const checkedCount = document.getElementById('checkedCount');
+    const tbody = document.getElementById('tbody');
+
+    /* ====================== RENDER ====================== */
+    function populateDayOptions(){
+      daySelect.innerHTML='';
+      ['senin','selasa','rabu','kamis','jumat'].forEach(k=>{
+        const o=document.createElement('option');
+        o.value=k; o.textContent=DAY_LABEL[k];
+        daySelect.appendChild(o);
+      });
+      daySelect.value=dayKeyFromDate(new Date());
+    }
+    function capitalize(s){
+      return String(s).toLowerCase().replace(/\b([a-zÀ-ÿ']+)/g, w => w.charAt(0).toUpperCase()+w.slice(1));
+    }
+    function renderStudentList(){
+      const dayKey=daySelect.value;
+      const list=schedule[dayKey]||[];
+      studentList.innerHTML='';
+      list.forEach((name,idx)=>{
+        const id=`chk_${dayKey}_${idx}`;
+        const label=document.createElement('label');
+        label.className='item';
+        label.innerHTML=`<input type="checkbox" id="${id}" data-name="${name}" /> <span>${idx+1}. ${capitalize(name)}</span>`;
+        studentList.appendChild(label);
+      });
+      updateCheckedCount();
+    }
+    function updateCheckedCount(){
+      checkedCount.textContent=String(studentList.querySelectorAll('input[type="checkbox"]:checked').length);
+    }
+    function renderTable(){
+      const data=loadRecords();
+      if(!data.length){
+        tbody.innerHTML='<tr><td colspan="4" class="empty">Belum ada data.</td></tr>'; return;
+      }
+      tbody.innerHTML=data.map(r=>`
+        <tr>
+          <td>${r.tanggal}</td>
+          <td>${r.jam}</td>
+          <td>${DAY_LABEL[r.hari]||r.hari}</td>
+          <td>${capitalize(r.nama)}</td>
+        </tr>`).join('');
+    }
+
+    /* ================ KIRIM KE GOOGLE SHEETS ================ */
+    async function sendToSheet(records){
+      if(!ENDPOINT_URL || !SECRET_TOKEN){
+        alert('Endpoint/Token belum diisi.');
+        return { ok:false, error:'Missing config' };
+      }
+      const payload = {
+        token: SECRET_TOKEN,
+        sendEmail: !!EMAIL_NOTIFY,
+        emailTo: EMAIL_NOTIFY || null,
+        records
+      };
+      try{
+        // pakai text/plain agar tidak kena preflight CORS
+        const resp = await fetch(ENDPOINT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload)
+        });
+        if(!resp.ok) return { ok:false, error:`HTTP ${resp.status}` };
+        return await resp.json();
+      }catch(err){
+        return { ok:false, error:String(err) };
+      }
+    }
+
+    /* ====================== AKSI ====================== */
+    async function submitAbsen(){
+      const boxes=[...studentList.querySelectorAll('input[type="checkbox"]:checked')];
+      if(!boxes.length){ alert('Pilih minimal satu nama.'); return; }
+
+      const t=nowParts(); const dayKey=daySelect.value;
+
+      // 1) simpan lokal
+      const recsLocal=loadRecords();
+      boxes.forEach(b=>recsLocal.unshift({tanggal:t.tanggal,jam:t.jam,hari:dayKey,nama:b.dataset.name}));
+      saveRecords(recsLocal);
+      renderTable();
+
+      // 2) kirim ke sheet
+      const toSend = boxes.map(b=>({ tanggal:t.tanggal, jam:t.jam, hari:dayKey, nama:b.dataset.name }));
+      const res = await sendToSheet(toSend);
+      if(res && res.ok){ alert('Terkirim ke Google Sheets ✅'); }
+      else{ alert('⚠️ Gagal kirim ke Sheets: ' + (res && res.error ? res.error : 'Unknown')); }
+
+      // bersihkan centang
+      studentList.querySelectorAll('input[type="checkbox"]').forEach(b=>b.checked=false);
+      updateCheckedCount();
+    }
+
+    function clearChecks(){
+      studentList.querySelectorAll('input[type="checkbox"]').forEach(b=>b.checked=false);
+      updateCheckedCount();
+    }
+    function clearAllData(){
+      if(confirm('Hapus semua data absensi di perangkat ini?')){
+        saveRecords([]); renderTable();
+      }
+    }
+    function exportCSV(){
+      const data=loadRecords();
+      if(!data.length){ alert('Belum ada data untuk diekspor.'); return; }
+      const header=['Tanggal','Jam','Hari','Nama'];
+      const rows=data.map(r=>[r.tanggal,r.jam,(DAY_LABEL[r.hari]||r.hari),capitalize(r.nama)]);
+      const csv=[header,...rows].map(row=>row.map(cell=>'"'+String(cell).replace(/"/g,'""')+'"').join(',')).join('\n');
+      const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a'); a.href=url; a.download=`absensi_piket_xictorious_${nowParts().iso}.csv`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    }
+
+    /* ====================== JAM ====================== */
+    function startClock(){
+      const el=document.getElementById('clock');
+      const fmt=new Intl.DateTimeFormat('id-ID',{timeZone:TZ,weekday:'long',day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+      function tick(){ el.textContent=fmt.format(new Date()); }
+      tick(); setInterval(tick,1000);
+    }
+
+    /* ====================== INIT ====================== */
+    function bindEvents(){
+      document.getElementById('btnSubmit').addEventListener('click', submitAbsen);
+      document.getElementById('btnClearDay').addEventListener('click', clearChecks);
+      document.getElementById('btnClearAll').addEventListener('click', clearAllData);
+      document.getElementById('btnExport').addEventListener('click', exportCSV);
+      document.getElementById('btnReloadList').addEventListener('click', renderStudentList);
+      daySelect.addEventListener('change', renderStudentList);
+      studentList.addEventListener('change', updateCheckedCount);
+      document.addEventListener('keydown', (e)=>{
+        if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); submitAbsen(); }
+        if((e.ctrlKey||e.metaKey) && (e.key.toLowerCase()==='s')){ e.preventDefault(); submitAbsen(); }
+      });
+    }
+    (function main(){ populateDayOptions(); renderStudentList(); renderTable(); bindEvents(); startClock(); })();
+  </script>
+</body>
+</html>
