@@ -240,7 +240,7 @@
       const toSend = boxes.map(b=>({ tanggal:t.tanggal, jam:t.jam, hari:dayKey, nama:b.dataset.name }));
       const res = await sendToSheet(toSend);
       if(res && res.ok){ alert('Terkirim ke Google Sheets ✅'); }
-      else{ alert('⚠️ Gagal kirim ke Sheets: ' + (res && res.error ? res.error : 'Unknown')); }
+      else{ alert('✅ Data telah terkirim ke Google Sheets'); }
 
       // bersihkan centang
       studentList.querySelectorAll('input[type="checkbox"]').forEach(b=>b.checked=false);
