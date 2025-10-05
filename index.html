@@ -70,6 +70,23 @@
 
       <div class="row" style="margin-top:12px;justify-content:space-between">
         <div class="muted">Nama mengikuti jadwal piket harian.</div>
+            <!-- ======= BUKTI FOTO ======= -->
+    <div class="row" style="margin-top:12px;align-items:flex-start;gap:14px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+        <label for="photoInput"><b>Bukti Foto (wajib yaaa 😊)</b></label>
+        <input id="photoInput" type="file" accept="image/*" capture="environment">
+        <div class="muted" style="max-width:520px">
+        Gunakan kamera belakang. Foto akan otomatis dikompres sebelum dikirim (&lt; 1 MB).
+        </div>
+        <div class="row" style="gap:8px">
+        <button class="secondary" type="button" id="btnClearPhoto">Hapus Foto</button>
+        </div>
+    </div>
+    <div>
+        <canvas id="previewCanvas" width="0" height="0" style="display:none;border:1px dashed var(--muted);border-radius:10px"></canvas>
+        <div id="photoInfo" class="muted" style="margin-top:6px"></div>
+    </div>
+    </div>
         <div class="row" style="gap:8px">
           <button class="primary" id="btnSubmit">Submit Absen</button>
           <button class="warn" id="btnClearDay">Hapus Centang</button>
@@ -109,7 +126,7 @@
 
   <script>
     /* ============== CONFIG (sudah diisi dengan data kamu) ============== */
-    const ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbxL0YoGI8tb924E-f-SXlxLnQqINnet_PUiAo1t0CU65vuCzLW2mSsac06oIT1K3-I1/exec';
+    const ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbxw9I54xp-oLACgfpSoYiky1Jhw_XDYlZgz55ck70SBDhHk7dkw_0wFAjiIHxTbkY_L/exec';
     const SECRET_TOKEN = 'RAFIF';
     const EMAIL_NOTIFY = ''; // opsional: isi email kalau mau dapat notifikasi
 
@@ -240,7 +257,7 @@
       const toSend = boxes.map(b=>({ tanggal:t.tanggal, jam:t.jam, hari:dayKey, nama:b.dataset.name }));
       const res = await sendToSheet(toSend);
       if(res && res.ok){ alert('Terkirim ke Google Sheets ✅'); }
-      else{ alert('✅ Data telah terkirim ke Google Sheets'); }
+      else{ alert('⚠️ Gagal kirim ke Sheets: ' + (res && res.error ? res.error : 'Unknown')); }
 
       // bersihkan centang
       studentList.querySelectorAll('input[type="checkbox"]').forEach(b=>b.checked=false);
@@ -292,5 +309,163 @@
     }
     (function main(){ populateDayOptions(); renderStudentList(); renderTable(); bindEvents(); startClock(); })();
   </script>
+  <script>
+    /* =============== FOTO: KOMPRES & PREVIEW =============== */
+    const MAX_DIM = 1280;          // sisi terpanjang (px)
+    const JPEG_QUALITY = 0.82;     // kualitas kompres
+
+    const photoInput = document.getElementById('photoInput');
+    const previewCanvas = document.getElementById('previewCanvas');
+    const photoInfo = document.getElementById('photoInfo');
+
+    let lastCompressedDataURL = null; // simpan dataURL hasil kompres untuk dikirim
+
+    function readFileAsImage(file){
+    return new Promise((resolve,reject)=>{
+        const fr = new FileReader();
+        fr.onload = ()=>{
+        const img = new Image();
+        img.onload = ()=>resolve(img);
+        img.onerror = reject;
+        img.src = fr.result;
+        };
+        fr.onerror = reject;
+        fr.readAsDataURL(file);
+    });
+    }
+
+    function drawContain(img, maxDim){
+    const w = img.naturalWidth, h = img.naturalHeight;
+    let tw=w, th=h;
+    if (w>h && w>maxDim){ th = Math.round(h * (maxDim/w)); tw = maxDim; }
+    else if (h>=w && h>maxDim){ tw = Math.round(w * (maxDim/h)); th = maxDim; }
+
+    const can = previewCanvas;
+    can.width = tw; can.height = th;
+    const ctx = can.getContext('2d');
+    ctx.clearRect(0,0,tw,th);
+    ctx.drawImage(img, 0, 0, tw, th);
+    can.style.display = 'block';
+    }
+
+    async function compressSelectedPhoto(file){
+    if (!file || !file.type.startsWith('image/')) {
+        clearPhoto();
+        return;
+    }
+    const img = await readFileAsImage(file);
+    drawContain(img, MAX_DIM);
+    const dataURL = previewCanvas.toDataURL('image/jpeg', JPEG_QUALITY);
+    lastCompressedDataURL = dataURL;
+    // info size
+    const estBytes = Math.round((dataURL.length - 'data:image/jpeg;base64,'.length) * 3/4);
+    const kb = Math.round(estBytes/1024);
+    photoInfo.textContent = `Pratinjau: ${previewCanvas.width}×${previewCanvas.height}px, ~${kb} KB`;
+    }
+
+    function clearPhoto(){
+    if (photoInput) photoInput.value = '';
+    lastCompressedDataURL = null;
+    if (previewCanvas){
+        previewCanvas.style.display='none';
+        previewCanvas.width=0; previewCanvas.height=0;
+    }
+    if (photoInfo) photoInfo.textContent='';
+    }
+
+    function dataURLtoBase64(dataURL){
+    if (!dataURL) return null;
+    const i = dataURL.indexOf('base64,');
+    return i>=0 ? dataURL.slice(i+7) : null;
+    }
+
+    // event input foto
+    if (photoInput) {
+    photoInput.addEventListener('change', ()=> {
+        const f = photoInput.files && photoInput.files[0];
+        compressSelectedPhoto(f);
+    });
+    }
+    const btnClearPhoto = document.getElementById('btnClearPhoto');
+    if (btnClearPhoto) btnClearPhoto.addEventListener('click', clearPhoto);
+
+    /* ================ KIRIM KE GOOGLE SHEETS (+ FOTO) ================ */
+    // GANTIKAN fungsi sendToSheet lama kamu dengan ini
+    async function sendToSheet(records, photoPayload){
+    if(!ENDPOINT_URL || !SECRET_TOKEN){
+        alert('Endpoint/Token belum diisi.');
+        return { ok:false, error:'Missing config' };
+    }
+    const payload = {
+        token: SECRET_TOKEN,
+        sendEmail: !!EMAIL_NOTIFY,
+        emailTo: EMAIL_NOTIFY || null,
+        records,
+        photo: photoPayload || null
+    };
+    try{
+        const resp = await fetch(ENDPOINT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // hindari preflight CORS
+        body: JSON.stringify(payload)
+        });
+        if(!resp.ok) return { ok:false, error:`HTTP ${resp.status}` };
+        return await resp.json();
+    }catch(err){
+        return { ok:false, error:String(err) };
+    }
+    }
+
+    /* ================ SUBMIT ABSEN (update agar kirim foto) ================ */
+    // GANTIKAN fungsi submitAbsen lama kamu dengan ini
+    async function submitAbsen(){
+    // asumsi kamu punya elemen-elemen berikut:
+    // - #studentList: container checkbox siswa (input[type="checkbox"][data-name])
+    // - #daySelect: select/opsi hari
+    const studentList = document.getElementById('studentList');
+    const daySelect = document.getElementById('daySelect');
+    const boxes = [...studentList.querySelectorAll('input[type="checkbox"]:checked')];
+    if(!boxes.length){ alert('Pilih minimal satu nama.'); return; }
+
+    const t = nowParts();
+    const dayKey = daySelect ? daySelect.value : '';
+
+    // (opsional) simpan lokal kalau kamu pakai fitur ini
+    // TODO: panggil loadRecords(), saveRecords(), renderTable() kalau sudah ada di projectmu
+
+    // siapkan foto (opsional)
+    let photoPayload = null;
+    if (lastCompressedDataURL){
+        const base64 = dataURLtoBase64(lastCompressedDataURL);
+        const filename = `bukti_${t.iso}_${dayKey}.jpg`;
+        photoPayload = { base64, filename, mime: 'image/jpeg' };
+    }
+
+    // kirim ke sheet
+    const toSend = boxes.map(b=>({ tanggal:t.tanggal, jam:t.jam, hari:dayKey, nama:b.dataset.name }));
+    const res = await sendToSheet(toSend, photoPayload);
+
+    if(res && res.ok){
+        alert(photoPayload ? 'Terkirim ke Google Sheets + Foto ✅' : 'Terkirim ke Google Sheets ✅');
+    } else {
+        alert('⚠️ Gagal kirim: ' + (res && res.error ? res.error : 'Unknown'));
+    }
+
+    // bersihkan centang & foto
+    studentList.querySelectorAll('input[type="checkbox"]').forEach(b=>b.checked=false);
+    if (typeof updateCheckedCount === 'function') updateCheckedCount();
+    clearPhoto();
+    }
+
+    // --- Reset semua listener lama tombol & bind ulang ke submitAbsen terbaru ---
+    (function rebindSubmit(){
+    const btn = document.getElementById('btnSubmit');
+    if (!btn) return;
+    const clone = btn.cloneNode(true);  // cloning = buang semua event listener lama
+    btn.parentNode.replaceChild(clone, btn);
+    clone.addEventListener('click', submitAbsen);
+    })();
+
+    </script>
 </body>
 </html>
