@@ -38,15 +38,16 @@
     footer{opacity:.7;text-align:center;padding:28px 12px}
     .kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;background:#0a1022;border:1px solid #27324a;padding:2px 6px;border-radius:6px;font-size:12px}
   
-       /* batasi lebar tampilan preview, tapi tetap responsif */
-    #previewCanvas{
-      max-width: 200px;   /* atur sesuai selera: 160–240px enak di mata */
-      width: 100%;
-      height: auto;
-      display: none;      /* tetap pakai JS untuk show/hide */
-      border: 1px dashed var(--muted);
-      border-radius: 10px;
-    }
+    /* batasi lebar tampilan preview, tapi tetap responsif */
+#previewCanvas{
+  max-width: 200px;   /* atur sesuai selera: 160–240px enak di mata */
+  width: 100%;
+  height: auto;
+  display: none;      /* tetap pakai JS untuk show/hide */
+  border: 1px dashed var(--muted);
+  border-radius: 10px;
+}
+
   </style>
 </head>
 <body>
@@ -135,13 +136,55 @@
   </footer>
 
   <script>
+
+// === Anti-spam & idempotency (client-side only) ===
+function makeUUID(){
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c/4).toString(16)
+  );
+}
+let isSubmitting = false;
+let currentController = null;
+let lastSubmissionId = null;
+
+function setSubmittingState(on){
+  const btn = document.getElementById('btnSubmit');
+  isSubmitting = !!on;
+  if (btn){
+    btn.disabled = !!on;
+    btn.textContent = on ? 'Mengirim...' : 'Submit Absen';
+    btn.setAttribute('aria-busy', on ? 'true' : 'false');
+  }
+  // Kunci semua input saat submit (opsional)
+  document.querySelectorAll('input, select, button').forEach(el => {
+    if (el.id !== 'btnClearPhoto') el.disabled = !!on;
+  });
+}
+
+const RECENT_KEY = 'piket_recent_submission_v1';
+function recentSet(key){
+  const obj = { key, ts: Date.now() };
+  try{ localStorage.setItem(RECENT_KEY, JSON.stringify(obj)); }catch{}
+}
+function recentIsDuplicate(key, windowMs){
+  try{
+    const raw = localStorage.getItem(RECENT_KEY);
+    if (!raw) return false;
+    const obj = JSON.parse(raw);
+    if (!obj || obj.key !== key) return false;
+    return (Date.now() - obj.ts) < windowMs;
+  }catch{}
+  return false;
+}
+
     /* ============== CONFIG (sudah diisi dengan data kamu) ============== */
     const ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbxw9I54xp-oLACgfpSoYiky1Jhw_XDYlZgz55ck70SBDhHk7dkw_0wFAjiIHxTbkY_L/exec';
     const SECRET_TOKEN = 'RAFIF';
     const EMAIL_NOTIFY = ''; // opsional: isi email kalau mau dapat notifikasi
 
     /* ====================== DATA JADWAL ====================== */
-const schedule = {
+    const schedule = {
       senin:  ["afriza","altirta","alfath","faiz","andhika","dani"],
       selasa: ["icha","fachri","farrel","nanta","galih","vina"],
       rabu:   ["fadillah","farizahlul","fatmahda","gio s","giovani","jojo"],
@@ -225,7 +268,7 @@ const schedule = {
     }
 
     /* ================ KIRIM KE GOOGLE SHEETS ================ */
-    async function sendToSheet(records){
+    async function sendToSheet(records, photoPayload, submissionId){
       if(!ENDPOINT_URL || !SECRET_TOKEN){
         alert('Endpoint/Token belum diisi.');
         return { ok:false, error:'Missing config' };
@@ -234,7 +277,9 @@ const schedule = {
         token: SECRET_TOKEN,
         sendEmail: !!EMAIL_NOTIFY,
         emailTo: EMAIL_NOTIFY || null,
-        records
+        records,
+        photo: photoPayload || null,
+        submissionId: submissionId || null
       };
       try{
         // pakai text/plain agar tidak kena preflight CORS
@@ -251,28 +296,7 @@ const schedule = {
     }
 
     /* ====================== AKSI ====================== */
-    async function submitAbsen(){
-      const boxes=[...studentList.querySelectorAll('input[type="checkbox"]:checked')];
-      if(!boxes.length){ alert('Pilih minimal satu nama.'); return; }
-
-      const t=nowParts(); const dayKey=daySelect.value;
-
-      // 1) simpan lokal
-      const recsLocal=loadRecords();
-      boxes.forEach(b=>recsLocal.unshift({tanggal:t.tanggal,jam:t.jam,hari:dayKey,nama:b.dataset.name}));
-      saveRecords(recsLocal);
-      renderTable();
-
-      // 2) kirim ke sheet
-      const toSend = boxes.map(b=>({ tanggal:t.tanggal, jam:t.jam, hari:dayKey, nama:b.dataset.name }));
-      const res = await sendToSheet(toSend);
-      if(res && res.ok){ alert('Terkirim ke Google Sheets ✅'); }
-      else{ alert('⚠️ Gagal kirim ke Sheets: ' + (res && res.error ? res.error : 'Unknown')); }
-
-      // bersihkan centang
-      studentList.querySelectorAll('input[type="checkbox"]').forEach(b=>b.checked=false);
-      updateCheckedCount();
-    }
+    
 
     function clearChecks(){
       studentList.querySelectorAll('input[type="checkbox"]').forEach(b=>b.checked=false);
@@ -318,11 +342,121 @@ const schedule = {
       });
     }
     (function main(){ populateDayOptions(); renderStudentList(); renderTable(); bindEvents(); startClock(); })();
-  </script>
+  
+// === Final submitAbsen (HTML-only anti-spam) ===
+async function submitAbsen(){
+  if (isSubmitting) return; // guard double click
+
+  const studentList = document.getElementById('studentList');
+  const daySelect   = document.getElementById('daySelect');
+  const boxes = [...studentList.querySelectorAll('input[type="checkbox"]:checked')];
+  if(!boxes.length){ alert('Pilih minimal satu nama.'); return; }
+
+  const t = nowParts();
+  const dayKey = daySelect ? daySelect.value : '';
+
+  // siapkan foto jika ada
+  let photoPayload = null;
+  if (typeof lastCompressedDataURL !== 'undefined' && lastCompressedDataURL){
+    const base64 = (function dataURLtoBase64(u){
+      const i = u.indexOf('base64,'); return i>=0 ? u.slice(i+7) : null;
+    })(lastCompressedDataURL);
+    const filename = `bukti_${t.iso}_${dayKey}.jpg`;
+    photoPayload = { base64, filename, mime: 'image/jpeg' };
+  }
+
+  // Buat "fingerprint" isi submit untuk cegah spam manual beruntun (20 detik)
+  const names = boxes.map(b=>b.dataset.name).sort().join('|');
+  const recentKey = `${t.tanggal}|${t.jam}|${dayKey}|${names}`;
+  if (recentIsDuplicate(recentKey, 20000)){
+    alert('Sepertinya barusan sudah dikirim. Coba tunggu sebentar.'); 
+    return;
+  }
+
+  // idempotency id (client-side)
+  if (!lastSubmissionId) lastSubmissionId = makeUUID();
+
+  setSubmittingState(true);
+  // Abort jika ada request lama (seharusnya tidak mungkin karena dikunci)
+  if (currentController) try{ currentController.abort(); }catch{}
+  currentController = new AbortController();
+
+  const toSend = boxes.map(b=>({ tanggal:t.tanggal, jam:t.jam, hari:dayKey, nama:b.dataset.name }));
+
+  try{
+    const res = await fetch(ENDPOINT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        token: SECRET_TOKEN,
+        sendEmail: !!EMAIL_NOTIFY,
+        emailTo: EMAIL_NOTIFY || null,
+        records: toSend,
+        photo: photoPayload || null,
+        submissionId: lastSubmissionId
+      }),
+      signal: currentController.signal
+      // NOTE: keepalive sengaja TIDAK dipakai karena Chrome membatasi ~64KB pada body keepalive.
+    });
+
+    let ok = false, duplicate = false, msg = '';
+    if (res.ok){
+      // server mungkin mengembalikan JSON
+      try {
+        const j = await res.json();
+        ok = !!j.ok;
+        duplicate = !!j.duplicate;
+      } catch(_){
+        ok = true; // kalau tidak JSON tapi 200, anggap sukses
+      }
+    } else {
+      // kalau server belum support idempotency, tetap tangani error
+      msg = `HTTP ${res.status}`;
+    }
+
+    if (ok){
+      recentSet(recentKey);
+      alert(photoPayload ? 'Terkirim ke Google Sheets + Foto ✅' : (duplicate ? 'Sudah pernah terkirim ✅' : 'Terkirim ke Google Sheets ✅'));
+      // reset state
+      lastSubmissionId = null;
+      // bersihkan centang & foto
+      studentList.querySelectorAll('input[type="checkbox"]').forEach(b=>b.checked=false);
+      if (typeof updateCheckedCount === 'function') updateCheckedCount();
+      if (typeof clearPhoto === 'function') clearPhoto();
+      // simpan lokal & render kalau ada
+      if (typeof loadRecords === 'function' && typeof saveRecords === 'function' && typeof renderTable === 'function'){
+        const recsLocal=loadRecords();
+        boxes.forEach(b=>recsLocal.unshift({tanggal:t.tanggal,jam:t.jam,hari:dayKey,nama:b.dataset.name}));
+        saveRecords(recsLocal);
+        renderTable();
+      }
+    } else {
+      alert('⚠️ Gagal kirim: ' + (msg || 'Unknown'));
+    }
+  } catch(e){
+    if (e.name !== 'AbortError'){
+      alert('⚠️ Gagal jaringan. Coba lagi.');
+    }
+  } finally{
+    setSubmittingState(false);
+    currentController = null;
+  }
+}
+
+// Bind tombol ke submitAbsen (bersih dari listener lama)
+(function rebindSubmit(){
+  const btn = document.getElementById('btnSubmit');
+  if (!btn) return;
+  const clone = btn.cloneNode(true);
+  btn.parentNode.replaceChild(clone, btn);
+  clone.addEventListener('click', submitAbsen);
+})();
+
+</script>
   <script>
     /* =============== FOTO: KOMPRES & PREVIEW =============== */
     const MAX_DIM = 1280;          // sisi terpanjang (px)
-    const JPEG_QUALITY = 0.82;     // kualitas kompres
+    const JPEG_QUALITY = 0.78;     // kualitas kompres
 
     const photoInput = document.getElementById('photoInput');
     const previewCanvas = document.getElementById('previewCanvas');
@@ -428,57 +562,9 @@ const schedule = {
 
     /* ================ SUBMIT ABSEN (update agar kirim foto) ================ */
     // GANTIKAN fungsi submitAbsen lama kamu dengan ini
-    async function submitAbsen(){
-    // asumsi kamu punya elemen-elemen berikut:
-    // - #studentList: container checkbox siswa (input[type="checkbox"][data-name])
-    // - #daySelect: select/opsi hari
-    const studentList = document.getElementById('studentList');
-    const daySelect = document.getElementById('daySelect');
-    const boxes = [...studentList.querySelectorAll('input[type="checkbox"]:checked')];
-    if(!boxes.length){ alert('Pilih minimal satu nama.'); return; }
-
-    const t = nowParts();
-    const dayKey = daySelect ? daySelect.value : '';
-
-    // (opsional) simpan lokal kalau kamu pakai fitur ini
-    // TODO: panggil loadRecords(), saveRecords(), renderTable() kalau sudah ada di projectmu
-
-    // siapkan foto (opsional)
-    let photoPayload = null;
-    if (lastCompressedDataURL){
-        const base64 = dataURLtoBase64(lastCompressedDataURL);
-        const filename = `bukti_${t.iso}_${dayKey}.jpg`;
-        photoPayload = { base64, filename, mime: 'image/jpeg' };
-    }
-
-    // kirim ke sheet
-    const toSend = boxes.map(b=>({ tanggal:t.tanggal, jam:t.jam, hari:dayKey, nama:b.dataset.name }));
-    const res = await sendToSheet(toSend, photoPayload);
-
-    if(res && res.ok){
-        alert(photoPayload ? 'Terkirim ke Google Sheets + Foto ✅' : 'Terkirim ke Google Sheets ✅');
-    } else {
-        alert('⚠️ Gagal kirim: ' + (res && res.error ? res.error : 'Unknown'));
-    }
-
-    // bersihkan centang & foto
-    studentList.querySelectorAll('input[type="checkbox"]').forEach(b=>b.checked=false);
-    if (typeof updateCheckedCount === 'function') updateCheckedCount();
-    clearPhoto();
-    }
+    
 
     // --- Reset semua listener lama tombol & bind ulang ke submitAbsen terbaru ---
-    (function rebindSubmit(){
-    const btn = document.getElementById('btnSubmit');
-    if (!btn) return;
-    const clone = btn.cloneNode(true);  // cloning = buang semua event listener lama
-    btn.parentNode.replaceChild(clone, btn);
-    clone.addEventListener('click', submitAbsen);
-    })();
-
     </script>
 </body>
 </html>
-
-
-
